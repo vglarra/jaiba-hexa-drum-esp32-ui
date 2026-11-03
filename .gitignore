@@ -1,0 +1,14 @@
+# PlatformIO
+.pio/
+.vscode/
+
+# Build artefacts
+*.hex
+*.bin
+*.elf
+*.map
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp
