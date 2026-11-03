@@ -190,7 +190,7 @@ void defaultKnobConfig() {
         knobConfig_[i].channel = 1;
         knobConfig_[i].minValue = 0;
         knobConfig_[i].maxValue = (i == 0) ? 16383 : 127;
-        knobConfig_[i].flags = (i == 0) ? 0x03 : 0x00;
+        knobConfig_[i].flags = (i == 0) ? 0x07 : 0x00;
     }
     // Keep knob 0 aligned with the table's 14-bit selected-pitch control.
     knobConfig_[0].cc = 20;
@@ -203,9 +203,10 @@ void applyKnobRow(int row) {
     lv_label_set_text(knobRows_[row].selectorLabel, kControls[selected].label);
 
     lv_bar_set_range(knobRows_[row].bar, 0, knobConfig_[row].maxValue);
-    lv_label_set_text_fmt(knobRows_[row].ccLabel, "CC %u · %s",
+    lv_label_set_text_fmt(knobRows_[row].ccLabel, "CC %u · %s · %s",
                           knobConfig_[row].cc,
-                          (knobConfig_[row].flags & 0x02) ? "14-bit" : "7-bit");
+                          (knobConfig_[row].flags & 0x02) ? "14-bit" : "7-bit",
+                          (knobConfig_[row].flags & 0x04) ? "ENC" : "POT");
     lv_label_set_text(knobRows_[row].enableLabel,
                       (knobConfig_[row].flags & 0x01) ? "ON" : "OFF");
     lv_obj_set_style_text_color(knobRows_[row].enableLabel,
@@ -312,12 +313,13 @@ void modalSelectEvent(lv_event_t* event) {
     bridge::KnobConfig& config = knobConfig_[modalRow_];
 
     uint8_t enabled = config.flags & 0x01;
+    uint8_t encoder = config.flags & 0x04;
     config.controlId = control.id;
     config.cc = control.cc;
     config.channel = 1;
     config.minValue = control.minValue;
     config.maxValue = control.maxValue;
-    config.flags = enabled | (control.bits == 14 ? 0x02 : 0x00);
+    config.flags = enabled | encoder | (control.bits == 14 ? 0x02 : 0x00);
 
     applyKnobRow(modalRow_);
     closeModal();
@@ -391,7 +393,7 @@ void buildKnobs() {
     lv_obj_set_style_radius(knobs_, 0, 0);
 
     makeLabel(knobs_, "KNOBS · FIXED CONTROL MAP", 16, 8, kFontMedium, kText);
-    makeLabel(knobs_, "KNOB 0 = A2 TEST POT", 540, 12, kFontSmall, kMuted);
+    makeLabel(knobs_, "KNOB 0 = ENCODER (CLK16 DT17 SW2)", 500, 12, kFontSmall, kMuted);
 
     for (int i = 0; i < bridge::kKnobCount; i++) {
         int y = 44 + i * 50;
