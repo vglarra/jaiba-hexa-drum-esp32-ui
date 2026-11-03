@@ -60,7 +60,8 @@ struct PadWidgets {
 };
 
 struct KnobRow {
-    lv_obj_t* dropdown = nullptr;
+    lv_obj_t* selector = nullptr;
+    lv_obj_t* selectorLabel = nullptr;
     lv_obj_t* bar = nullptr;
     lv_obj_t* value = nullptr;
     lv_obj_t* ccLabel = nullptr;
@@ -89,6 +90,10 @@ KnobRow knobRows_[bridge::kKnobCount];
 bridge::KnobConfig knobConfig_[bridge::kKnobCount];
 uint16_t knobValues_[bridge::kKnobCount] = {};
 bool configLoaded_ = false;
+
+lv_obj_t* modalOverlay_ = nullptr;
+lv_obj_t* modalButtons_[kControlCount] = {};
+int modalRow_ = -1;
 
 uint32_t lastUiMs_ = 0;
 uint32_t lastKnobMs_ = 0;
@@ -191,19 +196,25 @@ void defaultKnobConfig() {
     knobConfig_[0].cc = 20;
 }
 
+void applyKnobRow(int row) {
+    if (row < 0 || row >= bridge::kKnobCount) return;
+
+    int selected = findControl(knobConfig_[row].controlId);
+    lv_label_set_text(knobRows_[row].selectorLabel, kControls[selected].label);
+
+    lv_bar_set_range(knobRows_[row].bar, 0, knobConfig_[row].maxValue);
+    lv_label_set_text_fmt(knobRows_[row].ccLabel, "CC %u · %s",
+                          knobConfig_[row].cc,
+                          (knobConfig_[row].flags & 0x02) ? "14-bit" : "7-bit");
+    lv_label_set_text(knobRows_[row].enableLabel,
+                      (knobConfig_[row].flags & 0x01) ? "ON" : "OFF");
+    lv_obj_set_style_text_color(knobRows_[row].enableLabel,
+                                (knobConfig_[row].flags & 0x01) ? kGreen : kMuted, 0);
+}
+
 void applyConfigToRows() {
     for (int i = 0; i < bridge::kKnobCount; i++) {
-        int selected = findControl(knobConfig_[i].controlId);
-        lv_dropdown_set_selected(knobRows_[i].dropdown, selected);
-
-        lv_bar_set_range(knobRows_[i].bar, 0, knobConfig_[i].maxValue);
-        lv_label_set_text_fmt(knobRows_[i].ccLabel, "CC %u · %s",
-                              knobConfig_[i].cc,
-                              (knobConfig_[i].flags & 0x02) ? "14-bit" : "7-bit");
-        lv_label_set_text(knobRows_[i].enableLabel,
-                          (knobConfig_[i].flags & 0x01) ? "ON" : "OFF");
-        lv_obj_set_style_text_color(knobRows_[i].enableLabel,
-                                    (knobConfig_[i].flags & 0x01) ? kGreen : kMuted, 0);
+        applyKnobRow(i);
     }
 }
 
@@ -263,16 +274,42 @@ void saveEvent(lv_event_t* event) {
     }
 }
 
-void dropdownEvent(lv_event_t* event) {
+void closeModal() {
+    if (modalOverlay_ != nullptr) {
+        lv_obj_add_flag(modalOverlay_, LV_OBJ_FLAG_HIDDEN);
+    }
+    modalRow_ = -1;
+}
+
+void openModal(int row) {
+    if (modalOverlay_ == nullptr || row < 0 || row >= bridge::kKnobCount) return;
+
+    modalRow_ = row;
+    int selected = findControl(knobConfig_[row].controlId);
+    for (int i = 0; i < kControlCount; i++) {
+        lv_obj_set_style_bg_color(modalButtons_[i], i == selected ? kAccent : kTile, 0);
+    }
+
+    lv_obj_clear_flag(modalOverlay_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(modalOverlay_);
+}
+
+void selectorEvent(lv_event_t* event) {
     int row = (int)(uintptr_t)lv_event_get_user_data(event);
-    if (row < 0 || row >= bridge::kKnobCount) return;
+    openModal(row);
+}
 
-    lv_obj_t* dropdown = (lv_obj_t*)lv_event_get_target(event);
-    int selected = lv_dropdown_get_selected(dropdown);
-    if (selected < 0 || selected >= kControlCount) return;
+void modalCloseEvent(lv_event_t* event) {
+    (void)event;
+    closeModal();
+}
 
-    const ControlDef& control = kControls[selected];
-    bridge::KnobConfig& config = knobConfig_[row];
+void modalSelectEvent(lv_event_t* event) {
+    int controlIndex = (int)(uintptr_t)lv_event_get_user_data(event);
+    if (modalRow_ < 0 || controlIndex < 0 || controlIndex >= kControlCount) return;
+
+    const ControlDef& control = kControls[controlIndex];
+    bridge::KnobConfig& config = knobConfig_[modalRow_];
 
     uint8_t enabled = config.flags & 0x01;
     config.controlId = control.id;
@@ -282,9 +319,8 @@ void dropdownEvent(lv_event_t* event) {
     config.maxValue = control.maxValue;
     config.flags = enabled | (control.bits == 14 ? 0x02 : 0x00);
 
-    lv_bar_set_range(knobRows_[row].bar, 0, config.maxValue);
-    lv_label_set_text_fmt(knobRows_[row].ccLabel, "CC %u · %s",
-                          config.cc, (config.flags & 0x02) ? "14-bit" : "7-bit");
+    applyKnobRow(modalRow_);
+    closeModal();
 }
 
 // ============================================================
@@ -357,12 +393,6 @@ void buildKnobs() {
     makeLabel(knobs_, "KNOBS · FIXED CONTROL MAP", 16, 8, kFontMedium, kText);
     makeLabel(knobs_, "KNOB 0 = A2 TEST POT", 540, 12, kFontSmall, kMuted);
 
-    String options;
-    for (int i = 0; i < kControlCount; i++) {
-        if (i > 0) options += "\n";
-        options += kControls[i].label;
-    }
-
     for (int i = 0; i < bridge::kKnobCount; i++) {
         int y = 44 + i * 50;
         lv_obj_t* row = makePanel(knobs_, 12, y, 776, 44, kPanel);
@@ -370,17 +400,24 @@ void buildKnobs() {
         lv_obj_t* indexLabel = makeLabel(row, "0", 30, 12, kFontSmall, kMuted);
         lv_label_set_text_fmt(indexLabel, "%d", i);
 
-        lv_obj_t* dropdown = lv_dropdown_create(row);
-        lv_dropdown_set_options(dropdown, options.c_str());
-        lv_obj_set_pos(dropdown, 52, 4);
-        lv_obj_set_size(dropdown, 250, 36);
-        lv_obj_set_style_text_font(dropdown, kFontSmall, 0);
-        lv_obj_set_style_bg_color(dropdown, kTile, 0);
-        lv_obj_set_style_text_color(dropdown, kText, 0);
-        lv_obj_set_style_border_width(dropdown, 1, 0);
-        lv_obj_set_style_border_color(dropdown, kTileBorder, 0);
-        lv_obj_add_event_cb(dropdown, dropdownEvent, LV_EVENT_VALUE_CHANGED,
+        // Flat selector button. The old LVGL drop-down list opened a
+        // top-layer list with a shadow, which stalled the full-frame UI; a
+        // custom modal is predictable and matches the flat style.
+        lv_obj_t* selector = lv_obj_create(row);
+        lv_obj_remove_style_all(selector);
+        lv_obj_set_pos(selector, 52, 4);
+        lv_obj_set_size(selector, 250, 36);
+        lv_obj_set_style_bg_color(selector, kTile, 0);
+        lv_obj_set_style_bg_opa(selector, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(selector, 6, 0);
+        lv_obj_set_style_border_width(selector, 1, 0);
+        lv_obj_set_style_border_color(selector, kTileBorder, 0);
+        lv_obj_add_flag(selector, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(selector, selectorEvent, LV_EVENT_CLICKED,
                             (void*)(uintptr_t)i);
+
+        lv_obj_t* selectorLabel = makeLabel(selector, "", 8, 8, kFontSmall, kText);
+        makeLabel(selector, "v", 226, 6, kFontSmall, kMuted);
 
         lv_obj_t* bar = lv_bar_create(row);
         lv_obj_set_pos(bar, 318, 13);
@@ -393,7 +430,8 @@ void buildKnobs() {
         lv_obj_t* cc = makeLabel(row, "", 570, 12, kFontSmall, kMuted);
         lv_obj_t* enable = makeLabel(row, "OFF", 720, 12, kFontSmall, kMuted);
 
-        knobRows_[i].dropdown = dropdown;
+        knobRows_[i].selector = selector;
+        knobRows_[i].selectorLabel = selectorLabel;
         knobRows_[i].bar = bar;
         knobRows_[i].value = value;
         knobRows_[i].ccLabel = cc;
@@ -402,6 +440,43 @@ void buildKnobs() {
 
     makeButton(knobs_, "SAVE TO HUB", 16, 348, 180, 34, saveEvent, nullptr);
     saveStatus_ = makeLabel(knobs_, "HUB OFFLINE", 210, 358, kFontSmall, kRed);
+}
+
+void buildModal() {
+    // Full-screen dim overlay on the top layer, with a flat 2x4 control
+    // picker. No LVGL drop-down list, no list shadow, no scroll layer.
+    modalOverlay_ = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(modalOverlay_);
+    lv_obj_set_pos(modalOverlay_, 0, 0);
+    lv_obj_set_size(modalOverlay_, 800, 480);
+    lv_obj_set_style_bg_color(modalOverlay_, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(modalOverlay_, LV_OPA_70, 0);
+    lv_obj_set_scrollbar_mode(modalOverlay_, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_add_flag(modalOverlay_, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(modalOverlay_, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t* panel = makePanel(modalOverlay_, 80, 30, 640, 420, kPanel);
+    makeLabel(panel, "SELECT KNOB CONTROL", 20, 14, kFontMedium, kText);
+    makeButton(panel, "X", 580, 10, 40, 32, modalCloseEvent, nullptr);
+
+    for (int i = 0; i < kControlCount; i++) {
+        int col = i % 2;
+        int row = i / 2;
+        int x = 20 + col * 300;
+        int y = 64 + row * 80;
+
+        lv_obj_t* button = makePanel(panel, x, y, 280, 64, kTile);
+        lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(button, modalSelectEvent, LV_EVENT_CLICKED,
+                            (void*)(uintptr_t)i);
+
+        makeLabel(button, kControls[i].label, 12, 8, kFontSmall, kText);
+        lv_obj_t* sub = makeLabel(button, "", 12, 32, kFontSmall, kMuted);
+        lv_label_set_text_fmt(sub, "CC %u · %s", kControls[i].cc,
+                              kControls[i].bits == 14 ? "14-bit" : "7-bit");
+
+        modalButtons_[i] = button;
+    }
 }
 
 void buildPlaceholder(lv_obj_t** container, const char* title, const char* text) {
@@ -478,6 +553,7 @@ void init() {
     buildFooter();
     buildMonitor();
     buildKnobs();
+    buildModal();
     buildPlaceholder(&tuning_, "TUNING", "Per-pad threshold, curve and crosstalk — next phase.");
     buildPlaceholder(&calibration_, "CALIBRATION", "PIEZO / VELOSTAT calibration flow — next phase.");
 
