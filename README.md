@@ -69,24 +69,50 @@ pio device monitor -b 115200
 
 ## Current status
 
-**Phase 0 — bring-up.** The screen shows a Jaiba title, the panel resolution
-and a `TOUCH ME` button; each GT911 tap increments a counter. This verifies:
+**Phase 1 — hub monitor + knob config.** The screen now has:
 
-- the RGB panel and backlight,
-- the LVGL 9.1 full-frame double buffer in PSRAM,
-- the GT911/PCA9557 touch path.
+- **Monitor:** right 9 pads + left 7 pads, flat hex-ish tiles, hit flash and
+  last-hit line; 5 loop-pad placeholders; `R/L/HUB` status in the top bar.
+- **Knobs:** 6 rows with the fixed sampler-control drop-down, value bar, CC
+  and enable state; **SAVE TO HUB** writes the config to the Teensy EEPROM.
+- **Tuning / Cal:** placeholders for the next phase.
+- **TEST LEFT** in the top bar toggles the hub's fake-left injection while
+  the real left sensor is absent.
 
-Next phases (see the plan):
+The frame rate/touch tuning is intentionally deferred (the user accepted the
+current feel); the next performance pass will use a shorter LVGL refresh and
+partial rendering.
 
-1. Teensy control hub in `U_UI`: sensor UART bridge + knobs/buttons + USB-MIDI
-   `Jaiba Knobs`, I2C slave 0x42.
-2. ESP32 `BridgeTransport`: monitor both sensors through the hub; knob
-   configuration screen with the fixed control drop-down.
-3. Sampler third MIDI input and fixed control map.
-4. Third Teensy + restored left sensor; three MIDI ports.
+## Hub wiring (two-Teensy bench)
 
-The 5 left-side loop pads remain a later sensor-side feature; the UI will keep
-placeholders.
+The left Teensy is temporarily the **hub**, not a sensor:
+
+1. Move the left Teensy (now `Jaiba Knobs` on USB) from `U_L` to `U_UI`.
+   Leave `U_L` empty. The right sensor stays in `U_R`.
+2. Wire the display's I2C to the hub's `U_UI` pins:
+   - ESP32 **SDA (GPIO19)** → hub **pin 18 (SDA)**
+   - ESP32 **SCL (GPIO20)** → hub **pin 19 (SCL)**
+   - **GND ↔ GND**
+3. Power the display from its own 5 V/2 A supply; keep the common ground.
+   Do **not** bridge the display's 3.3 V to the hub's 3.3 V.
+4. Right sensor: UART on `U_UI` pins 0/1 → hub `Serial1`; left sensor:
+   `U_UI` pins 15/14 → hub `Serial3` (empty for now).
+5. Optional test pot: 10 kΩ wiper to `A2/16`, ends to 3.3 V/GND. Knob 0
+   (CC 20/52, 14-bit) sends over USB-MIDI `Jaiba Knobs`.
+
+On boot the status bar should show `HUB` green, `R` green (the hub's
+periodic `GET_PLAY_MODE` reaches the right sensor), and `L` grey until the
+fake-left test or the real left sensor. The hub's USB serial (115200) accepts
+`s` (status), `t` (toggle test mode) and `d` (config dump).
+
+## Next phases
+
+1. Sampler third MIDI input (`Jaiba Knobs`) and the fixed control map, so the
+   knobs actually change sampler parameters.
+2. Knob/button hardware and final pin map.
+3. Third Teensy in `U_UI`; left sensor back in `U_L`; three MIDI ports.
+4. LVGL performance pass and the Tuning/Calibration screens.
+5. 5 left-side loop pads (sensor-side backlog).
 
 ## Notes
 

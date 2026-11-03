@@ -1,16 +1,19 @@
-// Jaiba Hexa Drum — ESP32-S3 CrowPanel 7.0" bring-up
+// Jaiba Hexa Drum — ESP32-S3 CrowPanel 7.0" UI
 //
 // Display: 800x480 RGB (EK9716BD3 + EK73002ACGB), LovyanGFX RGB bus.
 // Touch:   GT911 on Wire1 (SDA 19, SCL 20), PCA9557 reset at 0x18.
 // UI:      LVGL 9.1, two full-frame buffers in PSRAM.
 //
-// Phase 0: verify the panel, backlight, GT911 and LVGL. The I2C control-hub
-// bridge and the sensor/knob screens come next (see the workspace plan).
+// Phase 1: Monitor + Knobs screens fed by the Teensy control hub over I2C.
 
 #include <LovyanGFX.hpp>
 #include <lgfx/v1/platforms/esp32s3/Bus_RGB.hpp>
 #include <lgfx/v1/platforms/esp32s3/Panel_RGB.hpp>
 #include <lvgl.h>
+
+#include "bridge_transport.h"
+#include "sensor_link.h"
+#include "ui.h"
 
 namespace {
 
@@ -87,8 +90,6 @@ namespace {
 
 lv_display_t* display = nullptr;
 lv_indev_t*   touchpad = nullptr;
-lv_obj_t*     statusLabel = nullptr;
-int           touchCounter = 0;
 
 uint32_t tickGet() {
     return millis();
@@ -111,47 +112,6 @@ void touchpadRead(lv_indev_t* indev, lv_indev_data_t* data) {
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
     }
-}
-
-void buttonClicked(lv_event_t* event) {
-    (void)event;
-    ++touchCounter;
-    lv_label_set_text_fmt(statusLabel, "GT911 touch events: %d", touchCounter);
-}
-
-void buildUi() {
-    lv_obj_t* screen = lv_screen_active();
-    lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
-    lv_obj_set_style_text_color(screen, lv_color_white(), 0);
-
-    lv_obj_t* title = lv_label_create(screen);
-    lv_label_set_text(title, "Jaiba Hexa Drum");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_40, 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 70);
-
-    lv_obj_t* subtitle = lv_label_create(screen);
-    lv_label_set_text(subtitle, "ESP32-S3  |  800 x 480  |  GT911");
-    lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(subtitle, lv_color_hex(0x8FB4D9), 0);
-    lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 130);
-
-    lv_obj_t* button = lv_button_create(screen);
-    lv_obj_set_size(button, 280, 96);
-    lv_obj_align(button, LV_ALIGN_CENTER, 0, 30);
-    lv_obj_set_style_radius(button, 14, 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0x1F6FEB), 0);
-    lv_obj_add_event_cb(button, buttonClicked, LV_EVENT_CLICKED, nullptr);
-
-    lv_obj_t* buttonLabel = lv_label_create(button);
-    lv_label_set_text(buttonLabel, "TOUCH ME");
-    lv_obj_set_style_text_font(buttonLabel, &lv_font_montserrat_20, 0);
-    lv_obj_center(buttonLabel);
-
-    statusLabel = lv_label_create(screen);
-    lv_label_set_text(statusLabel, "GT911 touch events: 0");
-    lv_obj_set_style_text_font(statusLabel, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(statusLabel, lv_color_hex(0x7A7A7A), 0);
-    lv_obj_align(statusLabel, LV_ALIGN_BOTTOM_MID, 0, -36);
 }
 
 } // namespace
@@ -197,15 +157,19 @@ void setup() {
     lv_indev_set_type(touchpad, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(touchpad, touchpadRead);
 
-    buildUi();
+    bridge::bridge.begin();
+    sensors::sensorLink.begin();
+    ui::init();
 
     pinMode(kBacklightPin, OUTPUT);
     digitalWrite(kBacklightPin, HIGH);
 
-    Serial.println("Jaiba ESP32 UI — Phase 0 bring-up");
+    Serial.println("Jaiba ESP32 UI — Phase 1: hub monitor + knob config");
 }
 
 void loop() {
+    sensors::sensorLink.poll();
+    ui::update();
     lv_timer_handler();
     delay(5);
 }
