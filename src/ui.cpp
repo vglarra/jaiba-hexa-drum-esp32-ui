@@ -66,6 +66,8 @@ struct KnobRow {
     lv_obj_t* value = nullptr;
     lv_obj_t* ccLabel = nullptr;
     lv_obj_t* enableLabel = nullptr;
+    lv_obj_t* switchLabel = nullptr;
+    lv_obj_t* switchDot = nullptr;
 };
 
 lv_obj_t* screen_ = nullptr;
@@ -90,6 +92,11 @@ KnobRow knobRows_[bridge::kKnobCount];
 bridge::KnobConfig knobConfig_[bridge::kKnobCount];
 uint16_t knobValues_[bridge::kKnobCount] = {};
 bool configLoaded_ = false;
+
+bridge::ButtonConfig buttonConfig_[bridge::kButtonCount];
+uint8_t buttonStates_[bridge::kButtonCount] = {};
+bool buttonConfigLoaded_ = false;
+uint32_t lastButtonConfigMs_ = 0;
 
 lv_obj_t* modalOverlay_ = nullptr;
 lv_obj_t* modalButtons_[kControlCount] = {};
@@ -180,6 +187,17 @@ int findControl(uint16_t id) {
         if (kControls[i].id == id) return i;
     }
     return 0;
+}
+
+String buttonAction(int row) {
+    if (row < 0 || row >= bridge::kButtonCount) return "—";
+    if (!(buttonConfig_[row].flags & 0x01)) return "—";
+    if (buttonConfig_[row].mode == 0) return "NOTE " + String(buttonConfig_[row].note);
+
+    for (int i = 0; i < kControlCount; i++) {
+        if (kControls[i].cc == buttonConfig_[row].note) return kControls[i].label;
+    }
+    return "CC " + String(buttonConfig_[row].note);
 }
 
 void defaultKnobConfig() {
@@ -432,12 +450,24 @@ void buildKnobs() {
         lv_obj_t* cc = makeLabel(row, "", 570, 12, kFontSmall, kMuted);
         lv_obj_t* enable = makeLabel(row, "OFF", 720, 12, kFontSmall, kMuted);
 
+        lv_obj_t* switchDot = lv_obj_create(row);
+        lv_obj_remove_style_all(switchDot);
+        lv_obj_set_pos(switchDot, 728, 18);
+        lv_obj_set_size(switchDot, 8, 8);
+        lv_obj_set_style_bg_color(switchDot, kMuted, 0);
+        lv_obj_set_style_bg_opa(switchDot, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(switchDot, 4, 0);
+
+        lv_obj_t* switchLabel = makeLabel(row, "—", 742, 12, kFontSmall, kMuted);
+
         knobRows_[i].selector = selector;
         knobRows_[i].selectorLabel = selectorLabel;
         knobRows_[i].bar = bar;
         knobRows_[i].value = value;
         knobRows_[i].ccLabel = cc;
         knobRows_[i].enableLabel = enable;
+        knobRows_[i].switchDot = switchDot;
+        knobRows_[i].switchLabel = switchLabel;
     }
 
     makeButton(knobs_, "SAVE TO HUB", 16, 348, 180, 34, saveEvent, nullptr);
@@ -531,6 +561,21 @@ void updateKnobs() {
             for (int i = 0; i < bridge::kKnobCount; i++) {
                 lv_bar_set_value(knobRows_[i].bar, knobValues_[i], LV_ANIM_OFF);
                 lv_label_set_text_fmt(knobRows_[i].value, "%u", knobValues_[i]);
+            }
+        }
+
+        if (!buttonConfigLoaded_ || (millis() - lastButtonConfigMs_) > 2000) {
+            if (bridge::bridge.readButtonConfig(buttonConfig_)) {
+                buttonConfigLoaded_ = true;
+                lastButtonConfigMs_ = millis();
+            }
+        }
+
+        if (bridge::bridge.readButtons(buttonStates_)) {
+            for (int i = 0; i < bridge::kButtonCount; i++) {
+                lv_label_set_text(knobRows_[i].switchLabel, buttonAction(i).c_str());
+                lv_obj_set_style_bg_color(knobRows_[i].switchDot,
+                                          buttonStates_[i] ? kAccent : kMuted, 0);
             }
         }
 
